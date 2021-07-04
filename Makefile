@@ -1,6 +1,6 @@
 
-TARGET = timeSync
-SOURCE_FILES = ${wildcard ./*.cpp}
+TARGET = test
+SOURCE_FILES = ${wildcard ./src/*.cpp}
 CC = g++
 RM = rm -rf
 LDFLAG = -lpthread -lmylog -lmydatastruct
@@ -10,7 +10,7 @@ INCLUDE = -I./lib/include
 INCLUDE += -I./extern/lib/include
 MACRO = 
 
-OBJECTS = $(patsubst %.cpp,%.o, $(SOURCE_FILES))
+OBJECTS = $(patsubst %.cpp,%.cpp.o, $(SOURCE_FILES))
 #OBJECTS := $(foreach item,$(SOURCE_FILES),$(CC) -c $(item) -o $(patsubst %.c,%.o, $(item)) $(INCLUDE) $(MACRO))
 #gcc -E  hello.c  -o hello.i
 #PRECOMPILE_FILES := $(foreach item,$(SOURCE_FILES),$(CC) -E $(item) -o $(patsubst %.c,%.i, $(item)) $(INCLUDE) $(MACRO))
@@ -21,8 +21,8 @@ $(TARGET): $(OBJECTS)
 	$(CC) -o $@ $^ $(LDFLAG)
 
 #gcc  -c  hello.s  -o  hello.o
-$(OBJECTS):$(SOURCE_FILES)
-	$(CC) -c $^ $(INCLUDE)
+$(OBJECTS):%.cpp.o:%.cpp
+	$(CC) -c $^ -o $@ $(INCLUDE)
 
 #gcc  -S  hello.i   -o  hello.s
 #$(COMPILE_FILES):$(PRECOMPILE_FILES)

@@ -3,5 +3,6 @@
 int main()
 {
 	TimeSync *t = new TimeSync();
+	while(1);
 	return 0;
 }
