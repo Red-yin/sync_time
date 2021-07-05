@@ -23,9 +23,11 @@ extern "C"{
 TimeSync::TimeSync()
 {
 	mode = SLAVE;
+	dbg("mode: SLAVE");
 	status = NORMAL;
 	mtimer = new CTimer();
 	timer_fd = mtimer->addTask(2*ALIVE_TIME, time_todo, this, 0);
+	memset(&master_addr, 0, sizeof(master_addr));
 
 	timeMapList = map_list_init(10);
 
@@ -149,6 +151,7 @@ int TimeSync::time_todo(pTaskContent task, void *param)
 				}
 				case WAIT_FOR_BET_RESULT:{
 					t->mode = MASTER;
+					dbg("mode: MASTER");
 					t->timer_fd = t->mtimer->addTask(ALIVE_TIME, time_todo, param, 1);
 					t->wakeup = (WakeupManage_T *)calloc(1, sizeof(WakeupManage_T));
 					//发送广播
@@ -159,6 +162,7 @@ int TimeSync::time_todo(pTaskContent task, void *param)
 					memcpy(sendbuf.timestamp, &cur_time, sizeof(sendbuf.timestamp));
 					sendbuf.s_addr = t->self_ip();
 					sendto(t->recv_sockfd, &sendbuf, sizeof(sendbuf), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
+					t->master_addr = sendbuf.s_addr;
 					break;
 				}
 			}
@@ -167,7 +171,7 @@ int TimeSync::time_todo(pTaskContent task, void *param)
 	}
 }
 
-void TimeSync::send(MsgType type, RunMode_E mode)
+void TimeSync::send(MsgType type)
 {
 	switch(mode){
 		case MASTER:{
@@ -195,9 +199,30 @@ void TimeSync::send(MsgType type, RunMode_E mode)
 				case BOARDCAST_RESPONSE:
 					//发送本机IP和接收到的时间戳
 					break;
-				case WAKEUP:
+				case WAKEUP:{
 					//被唤醒，把事件发送给MASTER
+					if(master_addr.s_addr == 0){
+						return;
+					}
+					struct sockaddr_in des_addr;
+					bzero(&des_addr, sizeof(des_addr));
+					des_addr.sin_family = AF_INET;
+					des_addr.sin_addr = master_addr;
+					des_addr.sin_port = htons(MASTER_PORT);
+					MsgContent_T sendbuf;
+					memset(&sendbuf, 0, sizeof(sendbuf));
+	
+					sendbuf.type = WAKEUP;
+					sendbuf.len = sizeof(sendbuf) - 1;
+					long cur_time = get_current_timestamp();
+					long master_time = time_map_slave_to_master(cur_time);
+					dbg("cur time : %ld, size : %d", master_time, sizeof(long));
+					memcpy(sendbuf.timestamp, &master_time, sizeof(sendbuf.timestamp));
+					sendbuf.s_addr = self_ip();
+					sendto(recv_sockfd, &sendbuf, sizeof(sendbuf), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
+		
 					break;
+				}
 				case BET:
 					//发送BET广播
 					break;
@@ -251,6 +276,9 @@ void TimeSync::handle(RunMode_E mode, MsgContent &content)
 					sendto(recv_sockfd, &content, sizeof(MsgContent_T), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
 
 					map_list_add(*(long *)content.timestamp);
+					master_addr = content.s_addr;
+					mtimer->deleteTask(timer_fd);
+					timer_fd = mtimer->addTask(ALIVE_TIME, time_todo, this, 0);
 					break;
 				}
 				case BOARDCAST_RESPONSE:

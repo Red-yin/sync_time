@@ -70,9 +70,9 @@ class TimeSync : public CThread
 		long time_map_slave_to_master(long slave_time);
 
 		WakeupManage_T *wakeup;
+		in_addr master_addr;
 
 		void* recv(void *);
-		void send(MsgType type, RunMode_E mode);
 		void handle(RunMode_E mode, MsgContent &content);
 		void run();
 		in_addr self_ip();//获取本机IP
@@ -86,4 +86,5 @@ class TimeSync : public CThread
 	public:
 		TimeSync();
 		~TimeSync();
+		void send(MsgType type);
 };
