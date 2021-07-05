@@ -104,7 +104,9 @@ int TimeSync::wakeup_response(pTaskContent task, void *param)
 	MsgContent_T sendbuf;
 	memset(&sendbuf, 0, sizeof(sendbuf));
 	sendbuf.type = WAKEUP;
-	
+
+	MsgContent_T &c = sendbuf;
+	t->print_TimesyncProtocol(c);
 	sendto(t->recv_sockfd, &sendbuf, sizeof(sendbuf), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
 	return 0;
 }
@@ -208,6 +210,7 @@ void TimeSync::send(MsgType type)
 					bzero(&des_addr, sizeof(des_addr));
 					des_addr.sin_family = AF_INET;
 					des_addr.sin_addr = master_addr;
+					dbg("self ip: %s", inet_ntoa(master_addr));
 					des_addr.sin_port = htons(MASTER_PORT);
 					MsgContent_T sendbuf;
 					memset(&sendbuf, 0, sizeof(sendbuf));
@@ -266,6 +269,7 @@ void TimeSync::handle(RunMode_E mode, MsgContent &content)
 			switch(content.type){
 				case BOARDCAST:{
 					//更新系统时间，立即回复BOARDCAST_RESPONSE给content->ip
+					master_addr = content.s_addr;
 					struct sockaddr_in des_addr;
 					bzero(&des_addr, sizeof(des_addr));
 					des_addr.sin_family = AF_INET;
@@ -276,9 +280,8 @@ void TimeSync::handle(RunMode_E mode, MsgContent &content)
 					sendto(recv_sockfd, &content, sizeof(MsgContent_T), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
 
 					map_list_add(*(long *)content.timestamp);
-					master_addr = content.s_addr;
 					mtimer->deleteTask(timer_fd);
-					timer_fd = mtimer->addTask(ALIVE_TIME, time_todo, this, 0);
+					timer_fd = mtimer->addTask(2*ALIVE_TIME, time_todo, this, 0);
 					break;
 				}
 				case BOARDCAST_RESPONSE:
