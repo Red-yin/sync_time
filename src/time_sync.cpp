@@ -50,6 +50,15 @@ TimeSync::TimeSync()
 	start();
 }
 
+TimeSync::~TimeSync()
+{
+	map_list_destory(&timeMapList);
+	if(wakeup){
+		free(wakeup);
+	}
+	delete mtimer;
+}
+
 void TimeSync::run()
 {
 	MsgContent_T content = {};
@@ -108,6 +117,8 @@ int TimeSync::wakeup_response(pTaskContent task, void *param)
 	MsgContent_T &c = sendbuf;
 	t->print_TimesyncProtocol(c);
 	sendto(t->recv_sockfd, &sendbuf, sizeof(sendbuf), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
+
+	memset(t->wakeup, 0, sizeof(WakeupManage_T));
 	return 0;
 }
 
@@ -175,6 +186,7 @@ int TimeSync::time_todo(pTaskContent task, void *param)
 
 void TimeSync::send(MsgType type)
 {
+	dbg("mode: %d, type: %d", mode, type);
 	switch(mode){
 		case MASTER:{
 			switch(type){
@@ -219,7 +231,7 @@ void TimeSync::send(MsgType type)
 					sendbuf.len = sizeof(sendbuf) - 1;
 					long cur_time = get_current_timestamp();
 					long master_time = time_map_slave_to_master(cur_time);
-					dbg("cur time : %ld, size : %d", master_time, sizeof(long));
+					dbg("cur time :%ld, master time: %ld, c-m = %ld", cur_time, master_time, cur_time-master_time);
 					memcpy(sendbuf.timestamp, &master_time, sizeof(sendbuf.timestamp));
 					sendbuf.s_addr = self_ip();
 					sendto(recv_sockfd, &sendbuf, sizeof(sendbuf), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
@@ -249,6 +261,7 @@ void TimeSync::handle(RunMode_E mode, MsgContent &content)
 					break;
 				case BOARDCAST_RESPONSE:
 					//计算content->ip对应设备与本机的延迟，并保存到队列
+					//TODO: 保存对应设备的网络延迟数据，探索计算准确网络延迟的算法
 					break;
 				case WAKEUP:
 					//比对最早唤醒的设备，更新潜在响应唤醒事件设备信息
@@ -257,11 +270,33 @@ void TimeSync::handle(RunMode_E mode, MsgContent &content)
 						wakeup->s_addr = content.s_addr;
 						memcpy(wakeup->timestamp, content.timestamp, sizeof(wakeup->timestamp));
 						wakeup->timer_fd = mtimer->addTask(WAKEUP_DELAY, wakeup_response, (void *)this, 0);
+					}else{
+						long saved_timestamp = *(long *)wakeup->timestamp;
+						long new_timestamp = *(long *)content.timestamp;
+						if(new_timestamp < saved_timestamp){
+							memcpy(wakeup->timestamp, content.timestamp, sizeof(wakeup->timestamp));
+							wakeup->s_addr = content.s_addr;
+						}
 					}
 					break;
-				case BET:
+				case BET:{
 					//发送错误广播，告知本机为MASTER模式
+					struct sockaddr_in des_addr;
+					bzero(&des_addr, sizeof(des_addr));
+					des_addr.sin_family = AF_INET;
+					des_addr.sin_addr = content.s_addr;
+					des_addr.sin_port = htons(MASTER_PORT);
+	
+					//time_t cur_time = time(NULL);
+					long cur_time = get_current_timestamp();
+					dbg("cur time : %ld, size : %d", cur_time, sizeof(long));
+					memcpy(content.timestamp, &cur_time, sizeof(content.timestamp));
+					content.s_addr = self_ip();
+					content.type = BOARDCAST;
+					content.len = sizeof(content) - 1;
+					sendto(recv_sockfd, &content, sizeof(content), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
 					break;
+				}
 			}
 			break;
 		}
@@ -325,7 +360,7 @@ long TimeSync::time_map_slave_to_master(long slave_time)
 	if(timeMapList == NULL || timeMapList->head == NULL){
 		return -1;
 	}
-	return timeMapList->head[timeMapList->p].masterTimestamp + slave_time - timeMapList->head[timeMapList->p].slaveTimestamp;
+	return *(long *)(timeMapList->head[timeMapList->p].masterTimestamp) + slave_time - *(long *)(timeMapList->head[timeMapList->p].slaveTimestamp);
 }
 
 int TimeSync::map_list_add(long timestamp)
@@ -333,14 +368,14 @@ int TimeSync::map_list_add(long timestamp)
 	if(timeMapList == NULL || timeMapList->head == NULL){
 		return -1;
 	}
-	memcpy(timeMapList->head[timeMapList->p].masterTimestamp, &timestamp, sizeof(timeMapList->head[timeMapList->p].masterTimestamp));
-	long cur_time = get_current_timestamp();
-	dbg("cur time : %ld, size : %d", cur_time, sizeof(long));
-	memcpy(timeMapList->head[timeMapList->p].slaveTimestamp, &cur_time, sizeof(timeMapList->head[timeMapList->p].slaveTimestamp));
 	timeMapList->p++;
 	if(timeMapList->p == timeMapList->max){
 		timeMapList->p = 0;
 	}
+	memcpy(timeMapList->head[timeMapList->p].masterTimestamp, &timestamp, sizeof(timeMapList->head[timeMapList->p].masterTimestamp));
+	long cur_time = get_current_timestamp();
+	dbg("master time: %ld, cur time : %ld, c-m: %ld",timestamp, cur_time, cur_time-timestamp);
+	memcpy(timeMapList->head[timeMapList->p].slaveTimestamp, &cur_time, sizeof(timeMapList->head[timeMapList->p].slaveTimestamp));
 	return 0;
 }
 
