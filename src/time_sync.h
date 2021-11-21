@@ -13,16 +13,18 @@ typedef enum RunMode{
 
 typedef enum MsgType{
 	BOARDCAST, // 主模式：发送广播消息；从模式：接收广播消息
-	BOARDCAST_RESPONSE,//主模式：接收广播消息对应的单播回复；从模式：发送对广播消息的回复
-	WAKEUP,//主模式：接收方，从模式设备被唤醒的事件，发送方，发送目的设备响应唤醒事件；从模式，发送方，唤醒被触发，接收方，唤醒事件可以响应；
+	RESPONSE,//主模式：接收广播消息对应的单播回复；从模式：发送对广播消息的回复
+	NEGOTIATION,//主模式：发起竞选； 从模式：忽略； 说明：考虑到竞选可能会需要收集数据，会有时间延迟，因此增加协商消息（NEGOTIATION）
 	BET  //发送方：发起竞选；接收方：响应竞选，赢了再次发起竞选，输了不响应且进入等待广播状态
 }RecvMsgType_E;
 
+//协议数据格式
 typedef struct MsgContent{
 	char len;
 	char type;
 	in_addr s_addr;
 	char timestamp[8];
+	char index[8];
 }MsgContent_T;
 
 typedef struct TimeMap{
@@ -52,6 +54,25 @@ typedef struct WakeupManage{
 	char timestamp[8];
 }WakeupManage_T;
 
+typedef struct TimeDelay{
+	long master_timestamp;
+	long time_delay;
+	struct TimeDelay *next;
+}TimeDelay_T;
+
+typedef struct ItemTimeDelay{
+	in_addr s_addr;		//设备IP地址
+	TimeDelay_T *head;	//最老的数据
+	TimeDelay_T *tail;	//最新的数据
+	int count;			//存储的数据个数
+	struct ItemTimeDelay *next;
+}ItemTimeDelay_T;
+
+typedef struct SlaveDeviceList{
+	ItemTimeDelay_T *head;
+	int count;
+}SlaveDeviceList_T;
+
 class TimeSync : public CThread
 {
 	private:
@@ -69,10 +90,18 @@ class TimeSync : public CThread
 		void map_list_destory(TimeMapList_T **t);
 		long time_map_slave_to_master(long slave_time);
 
+		//所有SLAVE设备的网络延迟数据
+		SlaveDeviceList_T *device_td_list;
+
+		int bet(MsgContent_T &content);
+
 		WakeupManage_T *wakeup;
 		in_addr master_addr;
 
 		void* recv(void *);
+
+		ssize_t sendToMaster(RecvMsgType_E type, long timeStamp);
+		ssize_t sendBoardcast(RecvMsgType_E type, long timeStamp);
 		void handle(RunMode_E mode, MsgContent &content);
 		void run();
 		in_addr self_ip();//获取本机IP
