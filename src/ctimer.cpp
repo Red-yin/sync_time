@@ -65,6 +65,32 @@ int CTimer::epollAddfd(int fd)
     return 0;
 }
 
+int CTimer::addTask(int fd, taskHandler *handle, void *param)
+{
+	if(handle == NULL || fd <= 0){
+		return -1;
+	}
+
+    int ret;
+	if(epollAddfd(fd) != 0){
+		return -1;
+	}
+	
+	taskContent *task = (taskContent *)malloc(sizeof(taskContent));
+	if(task == NULL){
+		err("task malloc failed\n");
+		return -1;
+	}
+	task->fd = fd;
+	task->type = SOCKET;
+	task->handle = handle;
+	task->param = param;
+	memset(&task->hook, 0, sizeof(struct avl_node));
+	avl_insert(taskBase, &task->hook, compare);
+	return fd;
+
+}
+
 int CTimer::addTask(int ms, taskHandler *handle, void *param, int repeatFlag)
 {
 	if(handle == NULL || ms <= 0){
@@ -101,6 +127,7 @@ int CTimer::addTask(int ms, taskHandler *handle, void *param, int repeatFlag)
 		return -1;
 	}
 	task->fd = fd;
+	task->type = TIMER;
 	task->handle = handle;
 	task->param = param;
 	memset(&task->hook, 0, sizeof(struct avl_node));
@@ -195,10 +222,17 @@ void CTimer::run()
 				taskContent *task = findTask(sfd);
 				task->handle(task, task->param);
 #if 1
-				uint64_t exp = 0;
-				//if sfd is not read, sfd will be blocked
-				read(sfd, &exp, sizeof(uint64_t));
-				dbg("read %d: %u\n", sfd, exp);
+				switch(task->type){
+					case TIMER:{
+						uint64_t exp = 0;
+						//if sfd is not read, sfd will be blocked
+						read(sfd, &exp, sizeof(uint64_t));
+						dbg("read %d: %u\n", sfd, exp);
+						break;
+					}
+					case SOCKET:
+						break;
+				}
 #endif
 			}
         } 

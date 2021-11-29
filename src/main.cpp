@@ -17,7 +17,6 @@ int main()
 		dbg("%s", str.c_str());
 		if(str == "wakeup"){
 			cout << "send WAKEUP event\n";
-			t->send(WAKEUP);
 		}
 	}
 	return 0;

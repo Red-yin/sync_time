@@ -1,20 +1,22 @@
 //#include <pthread.h>
 #include "cthread.h"
 #include "ctimer.h"
+#include "thread_pool.h"
+#include "msg_queue.h"
 #include <time.h>
 #include <sys/time.h>
 #include <netinet/in.h>
 
 #define CONFIG_DEBUG 1
 typedef enum RunMode{
-	MASTER,
-	SLAVE
+	MASTER,		//主模式
+	SLAVE,		//从模式
+	NEGOTIATION	//协商模式，当主模式冲突时进入协商模式解决冲突 
 }RunMode_E;
 
 typedef enum MsgType{
 	BOARDCAST, // 主模式：发送广播消息；从模式：接收广播消息
 	RESPONSE,//主模式：接收广播消息对应的单播回复；从模式：发送对广播消息的回复
-	NEGOTIATION,//主模式：发起竞选； 从模式：忽略； 说明：考虑到竞选可能会需要收集数据，会有时间延迟，因此增加协商消息（NEGOTIATION）
 	BET  //发送方：发起竞选；接收方：响应竞选，赢了再次发起竞选，输了不响应且进入等待广播状态
 }RecvMsgType_E;
 
@@ -79,8 +81,8 @@ class TimeSync : public CThread
 		RunMode_E mode;
 		TimeSyncStatus_E status;
 		//pthread_t pt;
-		int recv_sockfd;
-		int send_sockfd;
+		int multicast_fd;
+		int unicast_fd;
 		CTimer *mtimer;
 		int timer_fd; 
 		//MASTER时间和本机时间映射
@@ -98,8 +100,6 @@ class TimeSync : public CThread
 		WakeupManage_T *wakeup;
 		in_addr master_addr;
 
-		void* recv(void *);
-
 		ssize_t sendToMaster(RecvMsgType_E type, long timeStamp);
 		ssize_t sendBoardcast(RecvMsgType_E type, long timeStamp);
 		void handle(RunMode_E mode, MsgContent &content);
@@ -110,8 +110,13 @@ class TimeSync : public CThread
 		void print_TimesyncProtocol(MsgContent_T &t);
 #endif
 
+		ThreadPool *tp;
+		MsgQueue *mq;
+
 		static int time_todo(pTaskContent task, void *param);
 		static int wakeup_response(pTaskContent task, void *param);
+		static void *recv_multicast(void *param);
+		static void *recv_unicast(void *param);
 	public:
 		TimeSync();
 		~TimeSync();

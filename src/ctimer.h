@@ -4,11 +4,17 @@
 
 #include "avltree.h"
 
+enum taskType{
+	TIMER,
+	SOCKET
+};
+
 typedef struct taskContent{
 	struct avl_node hook;
 	int fd;
 	int (*handle)(struct taskContent *, void *);
 	void *param;
+	enum taskType type;
 }taskContent, *pTaskContent;
 
 typedef int taskHandler(pTaskContent, void *);
@@ -19,6 +25,7 @@ class CTimer: public CThread
 		CTimer();
 		~CTimer();
 		int addTask(int ms, taskHandler *handle, void *param, int repeatFlag);
+		int addTask(int fd, taskHandler *handle, void *param);
 		int deleteTask(int fd);
 		int scanTask();
 		taskContent *findTask(int fd);

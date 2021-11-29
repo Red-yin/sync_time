@@ -21,4 +21,5 @@ void* CThread::start_thread(void *arg)
 {
 	CThread *ptr = (CThread*)arg;
 	ptr->run();
+	return NULL;
 }
