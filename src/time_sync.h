@@ -83,6 +83,7 @@ class TimeSync : public CThread
 		//pthread_t pt;
 		int multicast_fd;
 		int unicast_fd;
+		sem_t sem;
 		CTimer *mtimer;
 		int timer_fd; 
 		//MASTER时间和本机时间映射
@@ -92,6 +93,10 @@ class TimeSync : public CThread
 		void map_list_destory(TimeMapList_T **t);
 		long time_map_slave_to_master(long slave_time);
 
+		bool master_exist;
+		bool is_master_exist();
+		void set_master_exist(bool);
+		void mode_switch(RunMode_E mode);
 		//所有SLAVE设备的网络延迟数据
 		SlaveDeviceList_T *device_td_list;
 
@@ -114,7 +119,6 @@ class TimeSync : public CThread
 		MsgQueue *mq;
 
 		static int time_todo(pTaskContent task, void *param);
-		static int wakeup_response(pTaskContent task, void *param);
 		static void *recv_multicast(void *param);
 		static void *recv_unicast(void *param);
 		static void *msg_handle(void *param);

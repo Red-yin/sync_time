@@ -24,6 +24,7 @@ TimeSync::TimeSync()
 	mode = SLAVE;
 	dbg_t("mode: SLAVE");
 	status = NORMAL;
+	sem_init(&sem，0，0)
 	mtimer = new CTimer();
 	//timer_fd = mtimer->addTask(3*ALIVE_TIME, time_todo, this, 0);
 	memset(&master_addr, 0, sizeof(master_addr));
@@ -91,18 +92,42 @@ void TimeSync::run()
 		#endif
 
 		//sendto(multicast_fd, recvbuf, sizeof(recvbuf), 0, (struct sockaddr*)&client_addr, client_len);  //发送信息给client，注意使用了client_addr结构体指针
-
+	
 		switch(mode){
 			case MASTER:
 				//一个周期发送一个组播消息
+				sleep(1);
+				long cur_time = get_current_timestamp();
+				sendBoardcast(BOARDCAST, cur_time);
 				break;
 			case SLAVE:
 				//几个周期检查一次组播消息是否正常
+				sleep(3);
+				if(is_master_exist() == false){
+					mode_switch(MASTER);
+				}else{
+					set_master_exist(false);
+				}
 				break;
 			case NEGOTIATION:
 				break;
 		}
 	}
+}
+
+bool TimeSync::is_master_exist()
+{
+	return master_exist;
+}
+
+void TimeSync::mode_switch(RunMode_E m)
+{
+	mode = m;
+}
+
+void TimeSync::set_master_exist(bool b)
+{
+	master_exist = b;
 }
 
 long TimeSync::get_current_timestamp()
@@ -168,26 +193,6 @@ void *TimeSync::msg_handle(void *param)
 		MsgContent_T & c = *content;
 		ts->handle(ts->mode, c);
 	}
-}
-
-int TimeSync::wakeup_response(pTaskContent task, void *param)
-{
-	TimeSync *t = (TimeSync *)param;
-	struct sockaddr_in des_addr;
-	bzero(&des_addr, sizeof(des_addr));
-	des_addr.sin_family = AF_INET;
-	des_addr.sin_addr = t->wakeup->s_addr;
-	des_addr.sin_port = htons(MASTER_PORT);
-	MsgContent_T sendbuf;
-	memset(&sendbuf, 0, sizeof(sendbuf));
-
-	MsgContent_T &c = sendbuf;
-	dbg_t("native send:");
-	t->print_TimesyncProtocol(c);
-	sendto(t->multicast_fd, &sendbuf, sizeof(sendbuf), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
-
-	memset(t->wakeup, 0, sizeof(WakeupManage_T));
-	return 0;
 }
 
 int TimeSync::time_todo(pTaskContent task, void *param)
@@ -520,7 +525,7 @@ void TimeSync::print_TimesyncProtocol(MsgContent_T &t)
 		MsgType type; char *type_str;
 	}type_str[] = {
 		{BOARDCAST, (char *)"BOARDCAST"},
-		{RESPONSE, (char *)"BOARDCAST_RESPONSE"},
+		{RESPONSE, (char *)"RESPONSE"},
 		{BET, (char *)"BET"}
 	};
 	char *type = NULL;
