@@ -25,7 +25,7 @@ TimeSync::TimeSync()
 	dbg_t("mode: SLAVE");
 	status = NORMAL;
 	mtimer = new CTimer();
-	timer_fd = mtimer->addTask(3*ALIVE_TIME, time_todo, this, 0);
+	//timer_fd = mtimer->addTask(3*ALIVE_TIME, time_todo, this, 0);
 	memset(&master_addr, 0, sizeof(master_addr));
 
 	timeMapList = map_list_init(10);
@@ -52,6 +52,8 @@ TimeSync::TimeSync()
 	tp = new ThreadPool(5, 10);
 	tp->add_job(recv_multicast, this);
 	tp->add_job(recv_unicast, this);
+	tp->add_job(msg_handle, this);
+
 	mq = new MsgQueue();
 	//创建一个线程接收消息以及处理消息
 	//t = std::thread(recv, this);
@@ -85,12 +87,21 @@ void TimeSync::run()
 		dbg_t("recv len: %d, data len: %d", n, (int)recvbuf[0]);
 		content = *(MsgContent_T *)recvbuf;
 		MsgContent_T & c = content;
+		handle(mode, c);
 		#endif
 
-		content = (MsgContent_T*)mq->get();
-		MsgContent_T & c = *content;
-		handle(mode, c);
 		//sendto(multicast_fd, recvbuf, sizeof(recvbuf), 0, (struct sockaddr*)&client_addr, client_len);  //发送信息给client，注意使用了client_addr结构体指针
+
+		switch(mode){
+			case MASTER:
+				//一个周期发送一个组播消息
+				break;
+			case SLAVE:
+				//几个周期检查一次组播消息是否正常
+				break;
+			case NEGOTIATION:
+				break;
+		}
 	}
 }
 
@@ -147,6 +158,16 @@ void *TimeSync::recv_unicast(void *param)
 		}
 	}
 	return 0;
+}
+
+void *TimeSync::msg_handle(void *param)
+{
+	TimeSync *ts = (TimeSync *)param;
+	while(1){
+		MsgContent_T* content = (MsgContent_T*)ts->mq->get();
+		MsgContent_T & c = *content;
+		ts->handle(ts->mode, c);
+	}
 }
 
 int TimeSync::wakeup_response(pTaskContent task, void *param)

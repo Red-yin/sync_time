@@ -117,6 +117,7 @@ class TimeSync : public CThread
 		static int wakeup_response(pTaskContent task, void *param);
 		static void *recv_multicast(void *param);
 		static void *recv_unicast(void *param);
+		static void *msg_handle(void *param);
 	public:
 		TimeSync();
 		~TimeSync();

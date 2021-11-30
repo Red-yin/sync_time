@@ -1,3 +1,3 @@
 #!/bin/bash
 
-ssh root@$1
+ssh root@192.168.0.$1
