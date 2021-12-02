@@ -18,7 +18,7 @@ typedef enum MsgType{
 	BOARDCAST, // 主模式：发送广播消息；从模式：接收广播消息
 	RESPONSE,//主模式：接收广播消息对应的单播回复；从模式：发送对广播消息的回复
 	BET  //发送方：发起竞选；接收方：响应竞选，赢了再次发起竞选，输了不响应且进入等待广播状态
-}RecvMsgType_E;
+}MsgType_E;
 
 //协议数据格式
 typedef struct MsgContent{
@@ -88,7 +88,6 @@ class TimeSync : public CThread
 		//pthread_t pt;
 		int multicast_fd;
 		int unicast_fd;
-		sem_t sem;
 		CTimer *mtimer;
 		int timer_fd; 
 		//MASTER时间和本机时间映射
@@ -110,9 +109,12 @@ class TimeSync : public CThread
 		WakeupManage_T *wakeup;
 		in_addr master_addr;
 
-		ssize_t sendToMaster(RecvMsgType_E type, long timeStamp);
-		ssize_t sendBoardcast(RecvMsgType_E type, long timeStamp);
-		void handle(RunMode_E mode, MsgContent &content);
+		ssize_t sendToMaster(MsgType_E type, long timeStamp);
+		ssize_t sendBoardcast(MsgType_E type, long timeStamp);
+		ssize_t sendMulticast(MsgType_E type, long timeStamp);
+		ssize_t sendUnicastTcp(in_addr *addr, MsgType_E type, long timeStamp);
+		ssize_t sendUnicastUdp(in_addr *addr, MsgType_E type, long timeStamp);
+		void handle(RunMode_E mode, MsgFrom_T *content);
 		void run();
 		in_addr self_ip();//获取本机IP
 		long get_current_timestamp();

@@ -10,6 +10,7 @@
 #include <netdb.h>
 #include <net/if.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 extern "C"{
 	#include "slog.h"
@@ -24,7 +25,6 @@ TimeSync::TimeSync()
 	mode = SLAVE;
 	dbg_t("mode: SLAVE");
 	status = NORMAL;
-	sem_init(&sem，0，0)
 	mtimer = new CTimer();
 	//timer_fd = mtimer->addTask(3*ALIVE_TIME, time_todo, this, 0);
 	memset(&master_addr, 0, sizeof(master_addr));
@@ -78,28 +78,15 @@ void TimeSync::run()
 	socklen_t client_len;
 	int n = 0;
 	while(1){
-		#if 0
-		client_len = sizeof(client_addr);
-		n = recvfrom(multicast_fd, recvbuf, sizeof(recvbuf), 0, (struct sockaddr *)&client_addr, &client_len);
-		if(n <= 0){
-			war("recv %d byte from %d", n, multicast_fd);
-			continue;
-		}
-		dbg_t("recv len: %d, data len: %d", n, (int)recvbuf[0]);
-		content = *(MsgContent_T *)recvbuf;
-		MsgContent_T & c = content;
-		handle(mode, c);
-		#endif
-
-		//sendto(multicast_fd, recvbuf, sizeof(recvbuf), 0, (struct sockaddr*)&client_addr, client_len);  //发送信息给client，注意使用了client_addr结构体指针
-	
+		dbg_t("current mode: %d", mode);
 		switch(mode){
-			case MASTER:
+			case MASTER:{
 				//一个周期发送一个组播消息
 				sleep(1);
 				long cur_time = get_current_timestamp();
-				sendBoardcast(BOARDCAST, cur_time);
+				sendMulticast(BOARDCAST, cur_time);
 				break;
+			}
 			case SLAVE:
 				//几个周期检查一次组播消息是否正常
 				sleep(3);
@@ -207,8 +194,7 @@ void *TimeSync::msg_handle(void *param)
 	TimeSync *ts = (TimeSync *)param;
 	while(1){
 		MsgFrom_T * content = (MsgFrom_T*)ts->mq->get();
-		MsgFrom_T & c = *content;
-		ts->handle(ts->mode, c);
+		ts->handle(ts->mode, content);
 	}
 }
 
@@ -300,7 +286,7 @@ int TimeSync::bet(MsgContent_T &content)
 	return 0;
 }
 
-ssize_t TimeSync::sendBoardcast(RecvMsgType_E type, long timeStamp)
+ssize_t TimeSync::sendMulticast(MsgType_E type, long timeStamp)
 {
 	struct sockaddr_in des_addr;
 	bzero(&des_addr, sizeof(des_addr));
@@ -319,7 +305,67 @@ ssize_t TimeSync::sendBoardcast(RecvMsgType_E type, long timeStamp)
 	return sendto(multicast_fd, &sendbuf, sizeof(sendbuf), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
 }
 
-ssize_t TimeSync::sendToMaster(RecvMsgType_E type, long timeStamp)
+ssize_t TimeSync::sendUnicastUdp(in_addr *addr, MsgType_E type, long timeStamp)
+{
+	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+	struct sockaddr_in des_addr;
+	bzero(&des_addr, sizeof(des_addr));
+	des_addr.sin_family = AF_INET;
+	des_addr.sin_addr = *addr;
+	des_addr.sin_port = htons(MASTER_PORT);
+
+	MsgContent_T content;
+	content.len = sizeof(MsgContent_T) - 1;
+	content.type = type;
+	content.s_addr = self_ip();
+
+	MsgContent_T &c = content;
+	print_TimesyncProtocol(c);
+
+	return sendto(fd, &content, sizeof(MsgContent_T), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
+}
+
+
+ssize_t TimeSync::sendUnicastTcp(in_addr *addr, MsgType_E type, long timeStamp)
+{
+	int fd = socket(AF_INET, SOCK_STREAM, 0);
+	struct sockaddr_in des_addr;
+	bzero(&des_addr, sizeof(des_addr));
+	des_addr.sin_family = AF_INET;
+	des_addr.sin_addr = *addr;
+	des_addr.sin_port = htons(MASTER_PORT);
+
+	MsgContent_T content;
+	content.len = sizeof(MsgContent_T) - 1;
+	content.type = type;
+	content.s_addr = self_ip();
+
+	MsgContent_T &c = content;
+	print_TimesyncProtocol(c);
+
+	return sendto(fd, &content, sizeof(MsgContent_T), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
+}
+
+ssize_t TimeSync::sendBoardcast(MsgType_E type, long timeStamp)
+{
+	struct sockaddr_in des_addr;
+	bzero(&des_addr, sizeof(des_addr));
+	des_addr.sin_family = AF_INET;
+	des_addr.sin_addr.s_addr = inet_addr("255.255.255.255"); //广播地址
+	des_addr.sin_port = htons(MASTER_PORT);
+	MsgContent_T sendbuf;
+	memset(&sendbuf, 0, sizeof(sendbuf));
+	sendbuf.type = type;
+	sendbuf.len = sizeof(sendbuf) - 1;
+	memcpy(sendbuf.timestamp, &timeStamp, sizeof(sendbuf.timestamp));
+	sendbuf.s_addr = self_ip();
+	dbg_t("native send:");
+	MsgContent_T &c = sendbuf;
+	print_TimesyncProtocol(c);
+	return sendto(multicast_fd, &sendbuf, sizeof(sendbuf), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
+}
+
+ssize_t TimeSync::sendToMaster(MsgType_E type, long timeStamp)
 {
 	struct sockaddr_in des_addr;
 	bzero(&des_addr, sizeof(des_addr));
@@ -410,8 +456,9 @@ void TimeSync::handle(RunMode_E mode, MsgFrom_T *mf)
 			switch(content.type){
 				case BOARDCAST:
 					//检查接收内容IP是否和本机一致，否则报错
-					//发送单播消息给消息源头，切换到协商模式
+					//发送单播消息给消息源头
 					dbg_t("self ip: %s", inet_ntoa(self_ip()));
+					sendUnicastTcp(&content.s_addr, BET, *(long *)content.timestamp);
 					break;
 				case RESPONSE:
 					//不可能出现的情况
@@ -445,22 +492,8 @@ void TimeSync::handle(RunMode_E mode, MsgFrom_T *mf)
 				case BOARDCAST:{
 					//更新系统时间，立即回复RESPONSE给content->ip
 					master_addr = content.s_addr;
-#if 0
-					struct sockaddr_in des_addr;
-					bzero(&des_addr, sizeof(des_addr));
-					des_addr.sin_family = AF_INET;
-					des_addr.sin_addr = content.s_addr;
-					des_addr.sin_port = htons(MASTER_PORT);
-					content.type = RESPONSE;
-					content.s_addr = self_ip();
-					sendto(multicast_fd, &content, sizeof(MsgContent_T), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
-#else
-					sendToMaster(RESPONSE, *(long *)content.timestamp);
-#endif
-					mtimer->deleteTask(timer_fd);
-					timer_fd = mtimer->addTask(2*ALIVE_TIME, time_todo, this, 0);
+					sendUnicastUdp(&content.s_addr, RESPONSE, *(long *)content.timestamp);
 					map_list_add(*(long *)content.timestamp);
-					status = NORMAL;
 					break;
 				}
 				case RESPONSE:
