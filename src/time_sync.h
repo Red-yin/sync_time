@@ -29,6 +29,11 @@ typedef struct MsgContent{
 	char index[8];
 }MsgContent_T;
 
+typedef struct MsgFrom{
+	int fd;
+	MsgContent_T *data;
+}MsgFrom_T;
+
 typedef struct TimeMap{
 	char masterTimestamp[8];
 	char slaveTimestamp[8];

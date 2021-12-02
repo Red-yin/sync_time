@@ -110,6 +110,9 @@ void TimeSync::run()
 				}
 				break;
 			case NEGOTIATION:
+				sleep(1);
+				long cur_time = get_current_timestamp();
+				sendBoardcast(BOARDCAST, cur_time);
 				break;
 		}
 	}
@@ -162,7 +165,14 @@ void *TimeSync::recv_multicast(void *param)
 		client_len = sizeof(client_addr);
 		n = recvfrom(ts->multicast_fd, (char *)content, sizeof(MsgContent_T), 0, (struct sockaddr *)&client_addr, &client_len);
 		if(n > 0){
-			ts->mq->put((void *)content);
+			MsgFrom_T *mf = (MsgFrom_T *)calloc(1, sizeof(MsgFrom_T));
+			if(mf == NULL){
+				printf("error: MsgFrom_T calloc failed");
+				continue;
+			}
+			mf->fd = ts->multicast_fd;
+			mf->data = content;
+			ts->mq->put((void *)mf);
 		}
 	}
 	return 0;
@@ -179,7 +189,14 @@ void *TimeSync::recv_unicast(void *param)
 		client_len = sizeof(client_addr);
 		n = recvfrom(ts->unicast_fd, (char *)content, sizeof(MsgContent_T), 0, (struct sockaddr *)&client_addr, &client_len);
 		if(n > 0){
-			ts->mq->put((void *)content);
+			MsgFrom_T *mf = (MsgFrom_T *)calloc(1, sizeof(MsgFrom_T));
+			if(mf == NULL){
+				printf("error: MsgFrom_T calloc failed");
+				continue;
+			}
+			mf->fd = ts->multicast_fd;
+			mf->data = content;
+			ts->mq->put((void *)mf);
 		}
 	}
 	return 0;
@@ -189,8 +206,8 @@ void *TimeSync::msg_handle(void *param)
 {
 	TimeSync *ts = (TimeSync *)param;
 	while(1){
-		MsgContent_T* content = (MsgContent_T*)ts->mq->get();
-		MsgContent_T & c = *content;
+		MsgFrom_T * content = (MsgFrom_T*)ts->mq->get();
+		MsgFrom_T & c = *content;
 		ts->handle(ts->mode, c);
 	}
 }
@@ -382,49 +399,48 @@ void TimeSync::send(MsgType type)
 	}
 }
 
-void TimeSync::handle(RunMode_E mode, MsgContent &content)
+void TimeSync::handle(RunMode_E mode, MsgFrom_T *mf)
 {
+	MsgContent &content = *mf->data;
 	print_TimesyncProtocol(content);
 	switch(mode){
 		case MASTER:{
 			dbg_t("current is MASTER");
+			if(mf->fd == multicast_fd){
 			switch(content.type){
 				case BOARDCAST:
 					//检查接收内容IP是否和本机一致，否则报错
+					//发送单播消息给消息源头，切换到协商模式
 					dbg_t("self ip: %s", inet_ntoa(self_ip()));
+					break;
+				case RESPONSE:
+					//不可能出现的情况
+					break;
+				case BET:{
+					//不可能出现的情况
+					break;
+				}
+			}
+			}else if(mf->fd == unicast_fd){
+			switch(content.type){
+				case BOARDCAST:
+					//不可能出现的情况
 					break;
 				case RESPONSE:
 					//计算content->ip对应设备与本机的延迟，并保存到队列
 					//TODO: 保存对应设备的网络延迟数据，探索计算准确网络延迟的算法
 					break;
 				case BET:{
-					//发送错误广播，告知本机为MASTER模式
-#if 0
-					struct sockaddr_in des_addr;
-					bzero(&des_addr, sizeof(des_addr));
-					des_addr.sin_family = AF_INET;
-					des_addr.sin_addr = content.s_addr;
-					des_addr.sin_port = htons(MASTER_PORT);
-	
-					//time_t cur_time = time(NULL);
-					long cur_time = get_current_timestamp();
-					dbg_t("cur time : %ld, size : %d", cur_time, sizeof(long));
-					memcpy(content.timestamp, &cur_time, sizeof(content.timestamp));
-					content.s_addr = self_ip();
-					content.type = BOARDCAST;
-					content.len = sizeof(content) - 1;
-					sendto(multicast_fd, &content, sizeof(content), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
-#else
-					long cur_time = get_current_timestamp();
-					sendBoardcast(BOARDCAST, cur_time);
-#endif
+					//开始竞选流程
 					break;
 				}
+			}
 			}
 			break;
 		}
 		case SLAVE:{
 			dbg_t("current is SLAVE");
+			if(mf->fd == multicast_fd){
 			switch(content.type){
 				case BOARDCAST:{
 					//更新系统时间，立即回复RESPONSE给content->ip
@@ -448,12 +464,55 @@ void TimeSync::handle(RunMode_E mode, MsgContent &content)
 					break;
 				}
 				case RESPONSE:
-					//不响应
+					//不可能出现的情况
 					break;
 				case BET:
-					//发送BET广播
-					bet(content);
+					//不可能出现的情况
 					break;
+			}
+			}else if(mf->fd == unicast_fd){
+			switch(content.type){
+				case BOARDCAST:{
+					//不可能出现的情况
+					break;
+				}
+				case RESPONSE:
+					//不可能出现的情况
+					break;
+				case BET:
+					//不可能出现的情况
+					break;
+			}
+			}
+			break;
+		}
+		case NEGOTIATION:{
+			if(mf->fd == multicast_fd){
+			switch(content.type){
+				case BOARDCAST:{
+					//回复竞选单播消息
+					break;
+				}
+				case RESPONSE:
+					//不可能出现的情况
+					break;
+				case BET:
+					//不可能出现的情况
+					break;
+			}
+			}else if(mf->fd == unicast_fd){
+			switch(content.type){
+				case BOARDCAST:{
+					//不可能出现的情况
+					break;
+				}
+				case RESPONSE:
+					//记录从机的数据
+					break;
+				case BET:
+					//开始竞选流程
+					break;
+			}
 			}
 			break;
 		}
