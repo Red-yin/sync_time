@@ -1,0 +1,66 @@
+
+COMPILE_ROOT=/home/redding/workspace/workcode/mixpad_rk3326_linux/buildroot/output/rockchip_rk3326_64/host/
+COMPILE_PREFIX = $(COMPILE_ROOT)/bin/aarch64-linux-
+ifeq ($(CC), )
+	CC = $(COMPILE_PREFIX)gcc -Werror
+endif
+
+CC = $(COMPILE_PREFIX)gcc -Werror
+OUT_DIR = out
+#TARGET = test
+SRC_DIR = .
+LIB_DIR = .
+BASE_LIB = libmydatastruct
+TARGET_STATIC_LIBS = $(BASE_LIB).a
+TARGET_SHARE_LIBS = $(BASE_LIB).so
+BASE_LIBS_FILES := $(foreach f, $(SRC_DIR), $(wildcard $(f)/*.c))
+OBJECT_FILES = $(patsubst %.c, %.o, $(BASE_LIBS_FILES))
+HEAD_FILES := $(foreach f, $(SRC_DIR), $(wildcard $(f)/*.h))
+LOCAL_HEAD_DIR = .
+HEAD_DIR = ../include
+CP = cp -r
+RM = rm -rf
+AR = $(COMPILE_PREFIX)ar rcs
+
+INCLUDE = -I$(HEAD_DIR)
+INCLUDE += -I$(LOCAL_HEAD_DIR)
+
+VPATH = ./compile
+
+#$(TARGET):$(BASE_LIB)
+#	$(CC) -o $@ test.c -L$(LIB_DIR) -ldataStructure -static -I$(INCLUDE) -lpthread
+	#$(CC) -o $@ test.c -L$(LIB_DIR) -ldataStructure $(INCLUDE) -lpthread
+
+$(TARGET_STATIC_LIBS):$(OBJECT_FILES)
+	$(AR) $@ $^
+
+$(TARGET_SHARE_LIBS):$(OBJECT_FILES)
+	$(CC) -shared -o $@ $^
+
+$(OBJECT_FILES):
+	#只有在将.c文件编译成.o文件时，include目录才会被用到
+	#在将.c文件编译.o文件的时候，都加上-fPIC，这样才能编译出动态库来，在链接打包生成库文件时这个参数是无效甚至非法的
+	$(foreach f, $(patsubst %.c, %.o, $(BASE_LIBS_FILES)), $(CC) -c -o $(f) $(patsubst %.o, %.c, $(f)) -fPIC $(INCLUDE);)
+
+$(BASE_LIB):init $(TARGET_SHARE_LIBS) $(TARGET_STATIC_LIBS) end
+
+end:
+	$(CP) $(TARGET_SHARE_LIBS) $(OUT_DIR)
+	$(CP) $(TARGET_STATIC_LIBS) $(OUT_DIR)
+	mkdir -p $(OUT_DIR)/include
+	$(CP) $(LOCAL_HEAD_DIR)/*.h $(OUT_DIR)/include
+
+init:
+	echo $(INCLUDE)
+	mkdir -p $(OUT_DIR)
+	mkdir -p $(LOCAL_HEAD_DIR)
+	$(CP) $(HEAD_FILES) $(LOCAL_HEAD_DIR)
+	echo $(BASE_LIBS_FILES)
+	#$(foreach d,$(SRC_DIR),$(CP) $(d)/*.c $(COMPILE_DIR);$(CP) $(d)/*.h $(COMPILE_DIR);)
+
+install:
+	$(CP) $(TARGET_STATIC_LIBS) ../lib
+	$(CP) *.h ../lib/include
+
+clean:
+	$(RM) $(OUT_DIR) $(OBJECT_FILES) $(LOCAL_HEAD_DIR) $(TARGET) $(TARGET_SHARE_LIBS) $(TARGET_STATIC_LIBS)
