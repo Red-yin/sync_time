@@ -49,10 +49,13 @@ TimeSync::TimeSync()
 	if (bind(unicast_fd, (struct sockaddr *)&des_addr, sizeof(des_addr)) < 0){
 		err("socket bind failed\n");
 	}
-
+	if(listen(unicast_fd, 256) == -1) {
+		err("Listen error:%s", strerror(errno));
+		exit(1);
+	}
 	tp = new ThreadPool(5, 10);
 	tp->add_job(recv_multicast, this);
-	tp->add_job(recv_unicast, this);
+	//tp->add_job(recv_unicast, this);
 	tp->add_job(msg_handle, this);
 
 	mq = new MsgQueue();
@@ -143,23 +146,29 @@ in_addr TimeSync::self_ip()
 
 void *TimeSync::recv_multicast(void *param)
 {
-	TimeSync *ts = (TimeSync *)param;
+	TimeSync *as = (TimeSync *)param;
 	while(1){
 		MsgContent_T *content = (MsgContent_T *)calloc(1, sizeof(MsgContent_T));
 		socklen_t client_len;
 		struct sockaddr_in client_addr;  //client_addr用于记录发送方的地址信息
+		bzero(&client_addr, sizeof(client_addr));
+		client_addr.sin_family = AF_INET;
+		client_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		client_addr.sin_port = htons(MASTER_PORT);
+	
 		int n = 0;
 		client_len = sizeof(client_addr);
-		n = recvfrom(ts->multicast_fd, (char *)content, sizeof(MsgContent_T), 0, (struct sockaddr *)&client_addr, &client_len);
+		n = recvfrom(as->multicast_fd, (char *)content, sizeof(MsgContent_T), 0, (struct sockaddr *)&client_addr, &client_len);
+		dbg_t("recvfd: %d %d",as->multicast_fd, n);
 		if(n > 0){
 			MsgFrom_T *mf = (MsgFrom_T *)calloc(1, sizeof(MsgFrom_T));
 			if(mf == NULL){
 				printf("error: MsgFrom_T calloc failed");
 				continue;
 			}
-			mf->fd = ts->multicast_fd;
+			mf->fd = as->multicast_fd;
 			mf->data = content;
-			ts->mq->put((void *)mf);
+			as->mq->put((void *)mf);
 		}
 	}
 	return 0;
@@ -167,23 +176,28 @@ void *TimeSync::recv_multicast(void *param)
 
 void *TimeSync::recv_unicast(void *param)
 {
-	TimeSync *ts = (TimeSync *)param;
+	TimeSync *as = (TimeSync *)param;
 	while(1){
 		MsgContent_T *content = (MsgContent_T *)calloc(1, sizeof(MsgContent_T));
 		socklen_t client_len;
 		struct sockaddr_in client_addr;  //client_addr用于记录发送方的地址信息
+		bzero(&client_addr, sizeof(client_addr));
+		client_addr.sin_family = AF_INET;
+		client_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		client_addr.sin_port = htons(MASTER_PORT);
 		int n = 0;
 		client_len = sizeof(client_addr);
-		n = recvfrom(ts->unicast_fd, (char *)content, sizeof(MsgContent_T), 0, (struct sockaddr *)&client_addr, &client_len);
+		n = recvfrom(as->unicast_fd, (char *)content, sizeof(MsgContent_T), 0, (struct sockaddr *)&client_addr, &client_len);
+		dbg_t("recvfd: %d %d",as->multicast_fd, n);
 		if(n > 0){
 			MsgFrom_T *mf = (MsgFrom_T *)calloc(1, sizeof(MsgFrom_T));
 			if(mf == NULL){
 				printf("error: MsgFrom_T calloc failed");
 				continue;
 			}
-			mf->fd = ts->multicast_fd;
+			mf->fd = as->multicast_fd;
 			mf->data = content;
-			ts->mq->put((void *)mf);
+			as->mq->put((void *)mf);
 		}
 	}
 	return 0;
@@ -191,10 +205,11 @@ void *TimeSync::recv_unicast(void *param)
 
 void *TimeSync::msg_handle(void *param)
 {
-	TimeSync *ts = (TimeSync *)param;
+	TimeSync *as = (TimeSync *)param;
 	while(1){
-		MsgFrom_T * content = (MsgFrom_T*)ts->mq->get();
-		ts->handle(ts->mode, content);
+		MsgFrom_T * content = (MsgFrom_T*)as->mq->get();
+		dbg_t("content get");
+		as->handle(as->mode, content);
 	}
 }
 
@@ -383,83 +398,29 @@ ssize_t TimeSync::sendToMaster(MsgType_E type, long timeStamp)
 	return sendto(multicast_fd, &sendbuf, sizeof(sendbuf), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
 }
 
-void TimeSync::send(MsgType type)
-{
-	dbg_t("mode: %d, type: %d", mode, type);
-	switch(mode){
-		case MASTER:{
-			switch(type){
-				case BOARDCAST:
-					//发送时间戳广播
-					break;
-				case RESPONSE:
-					//不响应
-					break;
-				case BET:
-					//不响应
-					break;
-			}
-			break;
-		}
-		case SLAVE:{
-			switch(type){
-				case BOARDCAST:
-					//不响应
-					break;
-				case RESPONSE:{
-					//发送本机IP和接收到的时间戳
-					break;
-					//被唤醒，把事件发送给MASTER
-					if(master_addr.s_addr == 0){
-						return;
-					}
-#if 0
-					struct sockaddr_in des_addr;
-					bzero(&des_addr, sizeof(des_addr));
-					des_addr.sin_family = AF_INET;
-					des_addr.sin_addr = master_addr;
-					dbg_t("self ip: %s", inet_ntoa(master_addr));
-					des_addr.sin_port = htons(MASTER_PORT);
-					MsgContent_T sendbuf;
-					memset(&sendbuf, 0, sizeof(sendbuf));
-	
-					sendbuf.len = sizeof(sendbuf) - 1;
-					long cur_time = get_current_timestamp();
-					long master_time = time_map_slave_to_master(cur_time);
-					dbg_t("cur time :%ld, master time: %ld, c-m = %ld", cur_time, master_time, cur_time-master_time);
-					memcpy(sendbuf.timestamp, &master_time, sizeof(sendbuf.timestamp));
-					sendbuf.s_addr = self_ip();
-					sendto(multicast_fd, &sendbuf, sizeof(sendbuf), 0, (struct sockaddr *)&des_addr, sizeof(des_addr));
-#else
-					long cur_time = get_current_timestamp();
-					long master_time = time_map_slave_to_master(cur_time);
-#endif
-					break;
-				}
-				case BET:
-					//发送BET广播
-					break;
-			}
-			break;
-		}
-	}
-}
-
 void TimeSync::handle(RunMode_E mode, MsgFrom_T *mf)
 {
 	MsgContent &content = *mf->data;
 	print_TimesyncProtocol(content);
 	switch(mode){
 		case MASTER:{
-			dbg_t("current is MASTER");
+			dbg_t("recv msg, state is MASTER");
 			if(mf->fd == multicast_fd){
 			switch(content.type){
-				case BOARDCAST:
+				case BOARDCAST:{
 					//检查接收内容IP是否和本机一致，否则报错
 					//发送单播消息给消息源头
-					dbg_t("self ip: %s", inet_ntoa(self_ip()));
-					sendUnicastTcp(&content.s_addr, BET, *(long *)content.timestamp);
+					char ip[16] = {0};
+					char *p = inet_ntoa(self_ip());
+					dbg_t("self ip: %s", p);
+					strcpy(ip, p);
+					p = inet_ntoa(content.s_addr);
+					dbg_t("recv ip: %s", p);
+					if(strcmp(ip, p) != 0){
+						sendUnicastUdp(&content.s_addr, BET, *(long *)content.timestamp);
+					}
 					break;
+				}
 				case RESPONSE:
 					//不可能出现的情况
 					break;
@@ -486,11 +447,12 @@ void TimeSync::handle(RunMode_E mode, MsgFrom_T *mf)
 			break;
 		}
 		case SLAVE:{
-			dbg_t("current is SLAVE");
+			dbg_t("recv msg, state is SLAVE");
 			if(mf->fd == multicast_fd){
 			switch(content.type){
 				case BOARDCAST:{
 					//更新系统时间，立即回复RESPONSE给content->ip
+					set_master_exist(true);
 					master_addr = content.s_addr;
 					sendUnicastUdp(&content.s_addr, RESPONSE, *(long *)content.timestamp);
 					map_list_add(*(long *)content.timestamp);

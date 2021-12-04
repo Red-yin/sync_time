@@ -1,6 +1,10 @@
 #include "msg_queue.h"
 #include <stdio.h>
 #include <stdlib.h>
+extern "C"{
+	#include "slog.h"
+};
+
 
 #define MSG_LIST_LIMIT 1024
 
@@ -26,6 +30,7 @@ int MsgQueue::put(void *data)
     int ret = msg_list_add(list, data);
     if(empty == 1 && ret == 0){
         pthread_cond_signal(&queue_empty);
+		dbg_t("data put signal");
     }
     pthread_mutex_unlock(&mutex);
     return ret;
@@ -36,7 +41,7 @@ void *MsgQueue::get()
     pthread_mutex_lock(&mutex);
     if(list->count == 0){
         pthread_cond_wait(&queue_empty, &mutex);  //等待队列为空
-        pthread_mutex_lock(&mutex);
+		dbg_t("data get signal");
     }
     void *ret = msg_list_delete(list);
     pthread_mutex_unlock(&mutex);
@@ -117,6 +122,7 @@ void *MsgQueue::msg_list_delete(msg_list_t *list)
     list->head = list->head->next;
     void *ret = node->data;
     free(node);
+    list->count--;
     return ret;
 }
 int MsgQueue::get_msg_node_number(msg_list_t *list)

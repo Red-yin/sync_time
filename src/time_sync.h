@@ -132,5 +132,4 @@ class TimeSync : public CThread
 	public:
 		TimeSync();
 		~TimeSync();
-		void send(MsgType type);
 };
