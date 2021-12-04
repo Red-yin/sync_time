@@ -333,6 +333,7 @@ ssize_t TimeSync::sendUnicastUdp(in_addr *addr, MsgType_E type, long timeStamp)
 	content.len = sizeof(MsgContent_T) - 1;
 	content.type = type;
 	content.s_addr = self_ip();
+	*(long *)content.timestamp = timeStamp;
 
 	MsgContent_T &c = content;
 	print_TimesyncProtocol(c);
