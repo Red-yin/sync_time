@@ -29,8 +29,14 @@ typedef struct MsgContent{
 	char index[8];
 }MsgContent_T;
 
+enum MsgFromType{
+	UDP_MULTICAST,
+	UDP_UNICAST,
+	TCP
+};
+
 typedef struct MsgFrom{
-	int fd;
+	enum MsgFromType type;
 	MsgContent_T *data;
 }MsgFrom_T;
 
@@ -129,6 +135,7 @@ class TimeSync : public CThread
 		static void *recv_multicast(void *param);
 		static void *recv_unicast(void *param);
 		static void *msg_handle(void *param);
+		static void *recv_tcp_msg(void *param);
 	public:
 		TimeSync();
 		~TimeSync();

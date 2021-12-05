@@ -20,6 +20,12 @@ extern "C"{
 #define MASTER_PORT 7655
 #define ALIVE_TIME 1000
 
+typedef struct msgRecvParam{
+	int fd;
+	MsgQueue *mq;
+	struct sockaddr_in client_addr;  //client_addr用于记录发送方的地址信息
+}msgRecvParam_t;
+
 TimeSync::TimeSync()
 {
 	mode = SLAVE;
@@ -55,7 +61,7 @@ TimeSync::TimeSync()
 	}
 	tp = new ThreadPool(5, 10);
 	tp->add_job(recv_multicast, this);
-	//tp->add_job(recv_unicast, this);
+	tp->add_job(recv_unicast, this);
 	tp->add_job(msg_handle, this);
 
 	mq = new MsgQueue();
@@ -166,7 +172,7 @@ void *TimeSync::recv_multicast(void *param)
 				printf("error: MsgFrom_T calloc failed");
 				continue;
 			}
-			mf->fd = as->multicast_fd;
+			mf->type = UDP_MULTICAST;
 			mf->data = content;
 			as->mq->put((void *)mf);
 		}
@@ -174,10 +180,53 @@ void *TimeSync::recv_multicast(void *param)
 	return 0;
 }
 
+void *TimeSync::recv_tcp_msg(void *param)
+{
+	msgRecvParam_t *rp = (msgRecvParam_t *)param;
+	while(1){
+		MsgContent_T *content = (MsgContent_T *)calloc(1, sizeof(MsgContent_T));
+		int ret = recv(rp->fd, (void *)content, sizeof(MsgContent_T), 0);
+		if (ret <= 0) {
+			// 客户端关闭
+			printf("client close\n");
+			close(rp->fd);
+			free(rp);
+			break;
+		}
+		MsgFrom_T *mf = (MsgFrom_T *)calloc(1, sizeof(MsgFrom_T));
+		if(mf == NULL){
+			printf("error: MsgFrom_T calloc failed");
+			continue;
+		}
+		mf->type = TCP;
+		mf->data = content;
+		rp->mq->put((void *)mf);
+	}
+	return NULL;
+}
+
 void *TimeSync::recv_unicast(void *param)
 {
 	TimeSync *as = (TimeSync *)param;
 	while(1){
+		// 接受请求
+		int conn_fd = -1;
+		msgRecvParam_t *p = (msgRecvParam_t *)calloc(1, sizeof(msgRecvParam_t));
+		if(p == NULL){
+			dbg_t("msgRecvParam calloc failed");
+			continue;
+		}
+		p->fd = conn_fd;
+		p->mq = as->mq;
+
+		socklen_t sock_len;
+		if ((conn_fd = accept(as->unicast_fd, (struct sockaddr *)&p->client_addr, &sock_len)) == -1) {
+			printf("accept socket error: %s\n\a", strerror(errno));
+			continue;
+		}
+		as->tp->add_job(recv_tcp_msg, (void *)p);
+
+#if 0
 		MsgContent_T *content = (MsgContent_T *)calloc(1, sizeof(MsgContent_T));
 		socklen_t client_len;
 		struct sockaddr_in client_addr;  //client_addr用于记录发送方的地址信息
@@ -199,6 +248,7 @@ void *TimeSync::recv_unicast(void *param)
 			mf->data = content;
 			as->mq->put((void *)mf);
 		}
+#endif
 	}
 	return 0;
 }
@@ -406,7 +456,7 @@ void TimeSync::handle(RunMode_E mode, MsgFrom_T *mf)
 	switch(mode){
 		case MASTER:{
 			dbg_t("recv msg, state is MASTER");
-			if(mf->fd == multicast_fd){
+			if(mf->type == UDP_MULTICAST){
 			switch(content.type){
 				case BOARDCAST:{
 					//检查接收内容IP是否和本机一致，否则报错
@@ -418,7 +468,7 @@ void TimeSync::handle(RunMode_E mode, MsgFrom_T *mf)
 					p = inet_ntoa(content.s_addr);
 					dbg_t("recv ip: %s", p);
 					if(strcmp(ip, p) != 0){
-						sendUnicastUdp(&content.s_addr, BET, *(long *)content.timestamp);
+						sendUnicastTcp(&content.s_addr, BET, *(long *)content.timestamp);
 					}
 					break;
 				}
@@ -430,7 +480,7 @@ void TimeSync::handle(RunMode_E mode, MsgFrom_T *mf)
 					break;
 				}
 			}
-			}else if(mf->fd == unicast_fd){
+			}else if(mf->type == TCP || mf->type == UDP_UNICAST){
 			switch(content.type){
 				case BOARDCAST:
 					//不可能出现的情况
@@ -449,7 +499,7 @@ void TimeSync::handle(RunMode_E mode, MsgFrom_T *mf)
 		}
 		case SLAVE:{
 			dbg_t("recv msg, state is SLAVE");
-			if(mf->fd == multicast_fd){
+			if(mf->type == UDP_MULTICAST){
 			switch(content.type){
 				case BOARDCAST:{
 					//更新系统时间，立即回复RESPONSE给content->ip
@@ -466,7 +516,7 @@ void TimeSync::handle(RunMode_E mode, MsgFrom_T *mf)
 					//不可能出现的情况
 					break;
 			}
-			}else if(mf->fd == unicast_fd){
+			}else if(mf->type == TCP || mf->type == UDP_UNICAST){
 			switch(content.type){
 				case BOARDCAST:{
 					//不可能出现的情况
@@ -483,7 +533,7 @@ void TimeSync::handle(RunMode_E mode, MsgFrom_T *mf)
 			break;
 		}
 		case NEGOTIATION:{
-			if(mf->fd == multicast_fd){
+			if(mf->type == UDP_MULTICAST){
 			switch(content.type){
 				case BOARDCAST:{
 					//回复竞选单播消息
@@ -496,7 +546,7 @@ void TimeSync::handle(RunMode_E mode, MsgFrom_T *mf)
 					//不可能出现的情况
 					break;
 			}
-			}else if(mf->fd == unicast_fd){
+			}else if(mf->type == TCP || mf->type == UDP_UNICAST){
 			switch(content.type){
 				case BOARDCAST:{
 					//不可能出现的情况
