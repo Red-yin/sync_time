@@ -3,12 +3,12 @@ TARGET = test
 SOURCE_FILES = ${wildcard ./src/*.cpp}
 CC = g++
 RM = rm -rf
-LDFLAG = -lpthread -lmylog -lmydatastruct
+LDFLAG = -lpthread -lmylog
 LDFLAG += -L./lib/lib
 LDFLAG += -L./extern/lib
 INCLUDE = -I./lib/include
 INCLUDE += -I./extern/lib/include
-MACRO = 
+MACRO = -DDEBUG
 
 OBJECTS = $(patsubst %.cpp,%.cpp.o, $(SOURCE_FILES))
 #OBJECTS := $(foreach item,$(SOURCE_FILES),$(CC) -c $(item) -o $(patsubst %.c,%.o, $(item)) $(INCLUDE) $(MACRO))
@@ -22,7 +22,7 @@ $(TARGET): $(OBJECTS)
 
 #gcc  -c  hello.s  -o  hello.o
 $(OBJECTS):%.cpp.o:%.cpp
-	$(CC) -c $^ -o $@ $(INCLUDE)
+	$(CC) -c $^ -o $@ $(INCLUDE) $(MACRO)
 
 #gcc  -S  hello.i   -o  hello.s
 #$(COMPILE_FILES):$(PRECOMPILE_FILES)
