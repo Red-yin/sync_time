@@ -6,28 +6,34 @@ extern "C"{
 };
 
 
-#define MSG_LIST_LIMIT 1024
-
-MsgQueue::MsgQueue(enum mode)
+MsgQueue::MsgQueue(int qs, enum mode): size(qs), head(NULL), tail(NULL), count(0)
 {
-    list = msg_list_init(MSG_LIST_LIMIT);
     if (pthread_mutex_init(&mutex, NULL))
     {
-        printf("failed to init mutex!\n");
+        err_t("failed to init mutex!\n");
+    }
+    if(pthread_cond_init(&queue_empty, NULL) || pthread_cond_init(&queue_full, NULL)){
+        err_t("msg queue cond init failed");
     }
 }
 
 MsgQueue::~MsgQueue()
 {
-    msg_list_destory(list);
+    msg_list_destory();
     pthread_mutex_destroy(&mutex);
+    pthread_cond_destroy(&queue_empty);
+    pthread_cond_destroy(&queue_full);
 }
 
 int MsgQueue::put(void *data)
 {
     pthread_mutex_lock(&mutex);
-    int empty = list->count == 0;
-    int ret = msg_list_add(list, data);
+    if(is_full()){
+        pthread_cond_wait(&queue_full, &mutex);  //等待队列为空
+		dbg_t("data get signal");
+    }
+    int empty = count == 0;
+    int ret = msg_list_add(data);
     if(empty == 1 && ret == 0){
         pthread_cond_signal(&queue_empty);
 		dbg_t("data put signal");
@@ -39,93 +45,71 @@ int MsgQueue::put(void *data)
 void *MsgQueue::get()
 {
     pthread_mutex_lock(&mutex);
-    if(list->count == 0){
+    if(is_empty()){
         pthread_cond_wait(&queue_empty, &mutex);  //等待队列为空
 		dbg_t("data get signal");
     }
-    void *ret = msg_list_delete(list);
+    bool f = is_full();
+    void *ret = msg_list_delete();
+    if(f){
+        pthread_cond_signal(&queue_full);
+		dbg_t("data put signal");
+    }
     pthread_mutex_unlock(&mutex);
     return ret;
 }
         
-bool MsgQueue::is_empty()
+bool MsgQueue::is_full() const
 {
-    pthread_mutex_lock(&mutex);
-    int ret = get_msg_node_number(list);
-    pthread_mutex_unlock(&mutex);
-    return ret==0;
+    return count >= size;
+}
+bool MsgQueue::is_empty() const
+{
+    return count==0;
 }
 
-msg_list_t *MsgQueue::msg_list_init(int limit)
+void MsgQueue::msg_list_destory()
 {
-    msg_list_t *l = (msg_list_t *)calloc(1, sizeof(msg_list_t));
-    if(l == NULL){
-        printf("calloc failed");
-        return NULL;
-    }
-    l->head = NULL;
-    l->tail = NULL;
-    l->limit = limit;
-    l->count = 0;
-    return l;
-}
-
-void MsgQueue::msg_list_destory(msg_list_t *l)
-{
-    if(l == NULL){
-        return ;
-    }
-    for(msg_node_t *p = l->head; l->count > 0; p = l->head, l->count--){
-        l->head = l->head->next;
+    for(Node *p = head; count > 0; p = head, count--){
+        head = head->next;
         free(p);
     }
-    free(l);
+    count = 0;
+    head = tail = NULL;
 }
 
-int MsgQueue::msg_list_add(msg_list_t *list, void *data)
+int MsgQueue::msg_list_add(void *data)
 {
-    if(list == NULL){
-        printf("error: list is NULL");
+    if(count >= size){
+        printf("list is full: %d, size: %d", count, size);
         return -1;
     }
-    if(list->count >= list->limit){
-        printf("list is full: %d, limit: %d", list->count, list->limit);
-        return -1;
-    }
-    msg_node_t *node = (msg_node_t*)calloc(1, sizeof(msg_list_t));
+    Node *node = (Node *)calloc(1, sizeof(Node));
     if(node == NULL){
         printf("msg node calloc failed");
         return -1;
     }
     node->data = data;
-    if(list->count == 0){
-        list->head = list->tail = node;
+    if(count == 0){
+        head = tail = node;
     }else{
-        list->tail->next = node;
-        list->tail = node;
+        tail->next = node;
+        tail = node;
     }
-    list->count++;
+    count++;
     return 0;
 }
 
-void *MsgQueue::msg_list_delete(msg_list_t *list)
+void *MsgQueue::msg_list_delete()
 {
-    if(list == NULL){
-        printf("list is NULL");
-        return NULL;
-    }
-    if(list->count == 0){
+    if(count == 0){
         printf("list is empty");
         return NULL;
     }
-    msg_node_t *node = list->head;
-    list->head = list->head->next;
+    Node *node = head;
+    head = head->next;
     void *ret = node->data;
     free(node);
-    list->count--;
+    count--;
     return ret;
-}
-int MsgQueue::get_msg_node_number(msg_list_t *list)
-{
-    return list->count;
 }

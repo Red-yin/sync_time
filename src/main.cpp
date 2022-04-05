@@ -1,23 +1,17 @@
-#include "time_sync.h"
-#include <string>
-#include <iostream>
-extern "C"{
-	#include "slog.h"
-};
+#include "sync_time.h"
+#include <unistd.h>
 
-using namespace std;
-int main()
+int main(void)
 {
-	TimeSync *t = new TimeSync();
-	string str;
-	while(1){
-		printf("cli>\n");
-		str.clear();
-		cin>>str;
-		dbg("%s", str.c_str());
-		if(str == "wakeup"){
-			cout << "send WAKEUP event\n";
-		}
-	}
-	return 0;
+	SyncTime *st = new SyncTime();
+#if 1
+	st->run();
+#else
+	t->send("192.168.134.131", 10000, (const void *)"hello", 5);
+	sleep(1);
+	t->send("192.168.134.131", 10000, (const void *)"12345", 5);
+	sleep(1);
+	t->over("192.168.134.131", 10000);
+#endif
+    return 0;
 }
