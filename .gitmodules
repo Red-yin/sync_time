@@ -1,0 +1,6 @@
+[submodule "extern/libevent"]
+	path = extern/libevent
+	url = https://github.com/libevent/libevent.git
+[submodule "extern/Code_c_log"]
+	path = extern/Code_c_log
+	url = git@github.com:Red-yin/Code_c_log.git
